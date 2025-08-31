@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "cmt-core",
+    "cmt-concurrent",
+    "cmt-bench",
+    "cmt-examples",
+]
