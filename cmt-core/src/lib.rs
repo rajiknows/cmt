@@ -1,3 +1,5 @@
+use std::clone;
+
 use crate::utils::calculate_merkle_hash;
 
 mod utils;
@@ -20,13 +22,37 @@ pub struct TreeNode<K, V> {
     pub right: Option<Box<TreeNode<K, V>>>,
 }
 
+impl<K: PartialEq, V> PartialEq for TreeNode<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+impl<K: Eq, V> Eq for TreeNode<K, V> {}
+
 pub struct CartesianMerkleTree<K, V> {
     root: Option<Box<TreeNode<K, V>>>,
 }
 
-impl<K, V> CartesianMerkleTree<K, V> {
+impl<K: std::cmp::PartialEq + std::cmp::PartialOrd + Clone, V> CartesianMerkleTree<K, V> {
     pub fn new() -> Self {
         Self { root: None }
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool
+    where
+        K: Ord,
+    {
+        let mut cur = self.root.as_ref();
+        while let Some(n) = cur {
+            if &n.key == key {
+                return true;
+            } else if key < &n.key {
+                cur = n.left.as_ref();
+            } else {
+                cur = n.right.as_ref();
+            }
+        }
+        false
     }
 
     pub fn insert(&mut self, key: K, value: V)
@@ -200,13 +226,74 @@ impl<K, V> CartesianMerkleTree<K, V> {
             Some(new_node)
         }
     }
+
+    pub fn generate_proof(&self, key: &K) -> Proof<K>
+    where
+        K: Clone,
+    {
+        let mut prefix: Vec<(K, Hash)> = Vec::new();
+        let mut cur = self.root.as_ref();
+        let mut last: Option<&TreeNode<K, V>> = None;
+        let mut existence = false;
+
+        while let Some(n) = cur {
+            if &n.key == key {
+                existence = true;
+                last = Some(n);
+                break;
+            }
+            // push (parent.e.k, parent.mh)
+            prefix.push((n.key.clone(), n.hash.clone()));
+            if key < &n.key {
+                cur = n.left.as_ref();
+            } else {
+                cur = n.right.as_ref();
+            }
+        }
+
+        let (left_h, right_h, non_ex_key) = if existence {
+            let ln = last
+                .unwrap()
+                .left
+                .as_ref()
+                .map(|x| x.hash.clone())
+                .unwrap_or_default();
+            let rn = last
+                .unwrap()
+                .right
+                .as_ref()
+                .map(|x| x.hash.clone())
+                .unwrap_or_default();
+            (ln, rn, None)
+        } else {
+            // non-existence: use the last traversed node as witness key
+            let witness = prefix.last().map(|(k, _)| k.clone());
+            let (ln, rn) = match cur {
+                Some(n) => (
+                    n.left.as_ref().map(|x| x.hash.clone()).unwrap_or_default(),
+                    n.right.as_ref().map(|x| x.hash.clone()).unwrap_or_default(),
+                ),
+                None => (Vec::new(), Vec::new()),
+            };
+            (ln, rn, witness)
+        };
+
+        let suffix = [left_h, right_h];
+
+        Proof {
+            prefix,
+            suffix,
+            existence,
+            nonexistence_key: non_ex_key,
+        }
+    }
 }
 
-pub struct Proof {
-    pub key: Key,
-    pub value_hash: Hash,
-    pub path: Vec<Hash>,
+pub struct Proof<K> {
+    pub prefix: Vec<(K, Hash)>,
+    pub suffix: [Hash; 2],
     pub existence: bool,
+    pub nonexistence_key: Option<K>,
 }
 
 fn find_priority<K: AsRef<[u8]>>(key: &K) -> Priority {
@@ -214,5 +301,5 @@ fn find_priority<K: AsRef<[u8]>>(key: &K) -> Priority {
     let digest = Sha256::digest(key.as_ref());
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
-    u128::from_be_bytes(bytes) as i128
+    i128::from_be_bytes(bytes) as i128
 }

@@ -64,3 +64,43 @@ pub fn rotate_right<K: AsRef<[u8]>, V>(mut y: Box<TreeNode<K, V>>) -> Box<TreeNo
 
     x
 }
+
+// Let CMT proof be a proof of membership of an element e in a tree T, represented as proof =
+// [prefix, suffix], where:
+// • prefix is an ordered list of Merkle path nodes, each containing pairs of values (n.e.k, n.mh) for
+// each node n;
+// • suffix consists of e.leftChildMH and e.rightChildMH, representing the subtree structure of e;
+// • existence is a boolean flag indicating whether e exists in the tree;
+// • nonExistenceKey is used when e does not exist in the tree, and helps verify that e is absent.
+// The initial value of acc is computed as:
+// acc = H((existence?e.k : nonExistenceKey) ∥ proof.suffix[0] ∥ proof.suffix[1])
+// ensuring that proof.suffix[0] < proof.suffix[1].
+// Then, acc is iteratively updated using values from prefix:
+// (
+// acc = H(n.e.k ∥ n.mh ∥ acc), if n.mh < acc,
+// acc = H(n.e.k ∥ acc ∥ n.mh), otherwise.
+// The proof is considered valid if the final value of acc matches the root of T.
+//
+// Algortithm
+//
+// Input: Element e = k to be proven in tree T
+// Output: Proof proof = [prefix, suffix, existence, nonExistenceKey]
+// Function GenerateProof(T, e):
+// Initialize empty lists: prefix ← [], suffix ← [];
+// Initialize bool variable existence ← true;
+// Initialize variable currentNode ← null;
+// /* Get the appropriate node for the entry e */
+// if e does not exist in the tree T then
+// currentNode ← node with appropriate key for non-existence proof;
+// existence ← false;
+// nonExistenceKey ← currentNode.e.k;
+// else
+// currentNode ← node in T where n.e = e;
+// /* Set suffix as the hash values of currentNode’s children */
+// suffix ← [n.leftChildMH, n.rightChildMH];
+// /* Construct prefix by traversing the path to the root */
+// while currentNode is not root do
+// parent ← Parent(currentNode);
+// Append (parent.e.k, parent.mh) to prefix;
+// currentNode ← parent;
+// return [prefix, suffix, existence, nonExistenceKey];
