@@ -1,4 +1,5 @@
 use crate::utils::calculate_merkle_hash;
+use parking_lot::RwLock;
 
 mod utils;
 
@@ -29,16 +30,19 @@ impl PartialEq for TreeNode {
 impl Eq for TreeNode {}
 
 pub struct CartesianMerkleTree {
-    root: Option<Box<TreeNode>>,
+    root: RwLock<Option<Box<TreeNode>>>,
 }
 
 impl CartesianMerkleTree {
     pub fn new() -> Self {
-        Self { root: None }
+        Self {
+            root: RwLock::new(None),
+        }
     }
 
     pub fn contains_key(&self, key: &Key) -> bool {
-        let mut cur = self.root.as_ref();
+        let cur = self.root.read();
+        let mut cur = cur.as_ref();
         while let Some(n) = cur {
             if &n.key == key {
                 return true;
@@ -51,9 +55,10 @@ impl CartesianMerkleTree {
         false
     }
 
-    pub fn insert(&mut self, key: Key, value: Value) {
+    pub fn insert(&self, key: Key, value: Value) {
         let priority = find_priority(&key);
-        self.root = Self::insert_recursive(self.root.take(), key, value, priority);
+        let mut root = self.root.write();
+        *root = Self::insert_recursive(root.take(), key, value, priority);
     }
 
     fn insert_recursive(
@@ -94,16 +99,22 @@ impl CartesianMerkleTree {
                 &mut new_node.right,
             );
             // recompute hash for new_node
-            let left_hash = new_node
-                .left
-                .as_ref()
-                .map(|n| n.hash.clone())
-                .unwrap_or_default();
-            let right_hash = new_node
-                .right
-                .as_ref()
-                .map(|n| n.hash.clone())
-                .unwrap_or_default();
+            let (left_hash, right_hash) = rayon::join(
+                || {
+                    new_node
+                        .left
+                        .as_ref()
+                        .map(|n| n.hash.clone())
+                        .unwrap_or_default()
+                },
+                || {
+                    new_node
+                        .right
+                        .as_ref()
+                        .map(|n| n.hash.clone())
+                        .unwrap_or_default()
+                },
+            );
             new_node.hash = calculate_merkle_hash(&new_node.key, &left_hash, &right_hash);
             return Some(new_node);
         }
@@ -118,16 +129,22 @@ impl CartesianMerkleTree {
             current_node.value = value;
         }
 
-        let left_hash = current_node
-            .left
-            .as_ref()
-            .map(|n| n.hash.clone())
-            .unwrap_or_default();
-        let right_hash = current_node
-            .right
-            .as_ref()
-            .map(|n| n.hash.clone())
-            .unwrap_or_default();
+        let (left_hash, right_hash) = rayon::join(
+            || {
+                current_node
+                    .left
+                    .as_ref()
+                    .map(|n| n.hash.clone())
+                    .unwrap_or_default()
+            },
+            || {
+                current_node
+                    .right
+                    .as_ref()
+                    .map(|n| n.hash.clone())
+                    .unwrap_or_default()
+            },
+        );
         current_node.hash = calculate_merkle_hash(&current_node.key, &left_hash, &right_hash);
 
         Some(current_node)
@@ -151,8 +168,9 @@ impl CartesianMerkleTree {
             }
         }
     }
-    pub fn remove(&mut self, key: &Key) {
-        self.root = Self::remove_recursive(self.root.take(), key);
+    pub fn remove(&self, key: &Key) {
+        let mut root = self.root.write();
+        *root = Self::remove_recursive(root.take(), key);
     }
 
     fn remove_recursive(node: Option<Box<TreeNode>>, key: &Key) -> Option<Box<TreeNode>> {
@@ -167,16 +185,22 @@ impl CartesianMerkleTree {
                 return Self::heapify(current_node);
             }
             // Update hash
-            let left_hash = current_node
-                .left
-                .as_ref()
-                .map(|n| n.hash.clone())
-                .unwrap_or_default();
-            let right_hash = current_node
-                .right
-                .as_ref()
-                .map(|n| n.hash.clone())
-                .unwrap_or_default();
+            let (left_hash, right_hash) = rayon::join(
+                || {
+                    current_node
+                        .left
+                        .as_ref()
+                        .map(|n| n.hash.clone())
+                        .unwrap_or_default()
+                },
+                || {
+                    current_node
+                        .right
+                        .as_ref()
+                        .map(|n| n.hash.clone())
+                        .unwrap_or_default()
+                },
+            );
             current_node.hash = calculate_merkle_hash(&current_node.key, &left_hash, &right_hash);
             return Some(current_node);
         }
@@ -205,7 +229,8 @@ impl CartesianMerkleTree {
 
     pub fn generate_proof(&self, key: &Key) -> Proof {
         let mut prefix: Vec<(Key, Hash)> = Vec::new();
-        let mut cur = self.root.as_ref();
+        let cur = self.root.read();
+        let mut cur = cur.as_ref();
         let mut last: Option<&TreeNode> = None;
         let mut existence = false;
 
